@@ -1,6 +1,70 @@
 Changelog
 ==========
 
+Version 5.6.0 *(2020-12-23)*
+----------------------------
+
+ * Cache messages for better performance
+ * Add a scrollbar on the main screen
+ * Adding some stability and translation improvements
+
+Version 5.5.1 *(2020-12-06)*
+----------------------------
+
+ * Properly show private contact names at group conversations
+ * Fixed private contacts not being visible on Android 11+
+ * Some stability and translation improvements
+
+Version 5.5.0 *(2020-11-04)*
+----------------------------
+
+ * Allow dialing or copying selected conversation phone numbers
+ * Allow copying specific parts of messages into clipboard
+ * Adding an option to show character counter at outgoing messages
+ * Couple other UI, translation and stability improvements
+
+Version 5.4.5 *(2020-10-27)*
+----------------------------
+
+ * Fixed some smaller glitches + translation improvements
+
+Version 5.4.4 *(2020-09-23)*
+----------------------------
+
+ * Fixing a crash at receiving MMS
+
+Version 5.4.3 *(2020-09-23)*
+----------------------------
+
+ * Fixing a crash at receiving MMS
+
+Version 5.4.2 *(2020-09-22)*
+----------------------------
+
+ * Fix incoming message notifications sometimes not being shown
+
+Version 5.4.1 *(2020-08-23)*
+----------------------------
+
+ * Show a tick at successfully sent messages
+ * Properly show the sender name at incoming messages, if sent by a private contact
+
+Version 5.4.0 *(2020-07-27)*
+----------------------------
+
+ * Show unread message badges on some devices that support it
+ * Added some improvements related to handling private contacts
+ * Other stability, UI and translation improvements
+
+Version 5.3.0 *(2020-06-18)*
+----------------------------
+
+ * Allow changing the text size
+ * Allow replying to incoming messages directly from the notification on Android 7+
+ * Make emails and urls clickable at messages
+ * Allow marking conversations as Unread
+ * Many other UX, stability and translation improvements
+
 Version 5.2.0 *(2020-05-30)*
 ----------------------------
 

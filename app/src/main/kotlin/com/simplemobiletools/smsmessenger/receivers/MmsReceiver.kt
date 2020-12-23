@@ -2,20 +2,19 @@ package com.simplemobiletools.smsmessenger.receivers
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import com.bumptech.glide.Glide
 import com.simplemobiletools.commons.extensions.isNumberBlocked
 import com.simplemobiletools.commons.helpers.ensureBackgroundThread
 import com.simplemobiletools.smsmessenger.R
-import com.simplemobiletools.smsmessenger.extensions.conversationsDB
-import com.simplemobiletools.smsmessenger.extensions.getConversations
-import com.simplemobiletools.smsmessenger.extensions.getLatestMMS
-import com.simplemobiletools.smsmessenger.extensions.showReceivedMessageNotification
+import com.simplemobiletools.smsmessenger.extensions.*
 
 // more info at https://github.com/klinker41/android-smsmms
 class MmsReceiver : com.klinker.android.send_message.MmsReceivedReceiver() {
     override fun onMessageReceived(context: Context, messageUri: Uri) {
         val mms = context.getLatestMMS() ?: return
-        val address = mms.participants.firstOrNull()?.phoneNumber ?: ""
+        val address = mms.participants.firstOrNull()?.phoneNumbers?.first() ?: ""
         if (context.isNumberBlocked(address)) {
             return
         }
@@ -25,7 +24,7 @@ class MmsReceiver : com.klinker.android.send_message.MmsReceivedReceiver() {
             val glideBitmap = try {
                 Glide.with(context)
                     .asBitmap()
-                    .load(mms.attachment!!.attachments.first().uri)
+                    .load(mms.attachment!!.attachments.first().getUri())
                     .centerCrop()
                     .into(size, size)
                     .get()
@@ -33,9 +32,14 @@ class MmsReceiver : com.klinker.android.send_message.MmsReceivedReceiver() {
                 null
             }
 
-            context.showReceivedMessageNotification(address, mms.body, mms.thread, glideBitmap, mms.id, true)
-            val conversation = context.getConversations(mms.thread.toLong()).firstOrNull() ?: return@ensureBackgroundThread
-            context.conversationsDB.insertOrUpdate(conversation)
+            Handler(Looper.getMainLooper()).post {
+                context.showReceivedMessageNotification(address, mms.body, mms.threadId, glideBitmap)
+                val conversation = context.getConversations(mms.threadId).firstOrNull() ?: return@post
+                ensureBackgroundThread {
+                    context.conversationsDB.insertOrUpdate(conversation)
+                    context.updateUnreadCountBadge(context.conversationsDB.getUnreadConversations())
+                }
+            }
         }
     }
 

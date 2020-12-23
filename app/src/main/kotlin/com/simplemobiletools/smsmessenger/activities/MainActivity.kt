@@ -21,6 +21,7 @@ import com.simplemobiletools.smsmessenger.adapters.ConversationsAdapter
 import com.simplemobiletools.smsmessenger.extensions.config
 import com.simplemobiletools.smsmessenger.extensions.conversationsDB
 import com.simplemobiletools.smsmessenger.extensions.getConversations
+import com.simplemobiletools.smsmessenger.extensions.updateUnreadCountBadge
 import com.simplemobiletools.smsmessenger.helpers.THREAD_ID
 import com.simplemobiletools.smsmessenger.helpers.THREAD_TITLE
 import com.simplemobiletools.smsmessenger.models.Conversation
@@ -35,6 +36,7 @@ class MainActivity : SimpleActivity() {
     private val MAKE_DEFAULT_APP_REQUEST = 1
 
     private var storedTextColor = 0
+    private var storedFontSize = 0
     private var bus: EventBus? = null
 
     @SuppressLint("InlinedApi")
@@ -77,9 +79,15 @@ class MainActivity : SimpleActivity() {
             (conversations_list.adapter as? ConversationsAdapter)?.updateTextColor(config.textColor)
         }
 
+        if (storedFontSize != config.fontSize) {
+            (conversations_list.adapter as? ConversationsAdapter)?.updateFontSize()
+        }
+
         updateTextColors(main_coordinator)
         no_conversations_placeholder_2.setTextColor(getAdjustedPrimaryColor())
         no_conversations_placeholder_2.underlineText()
+        conversations_fastscroller.updatePrimaryColor()
+        conversations_fastscroller.updateBubbleColors()
         checkShortcut()
     }
 
@@ -120,6 +128,7 @@ class MainActivity : SimpleActivity() {
 
     private fun storeStateVariables() {
         storedTextColor = config.textColor
+        storedFontSize = config.fontSize
     }
 
     // while SEND_SMS and READ_SMS permissions are mandatory, READ_CONTACTS is optional. If we don't have it, we just won't be able to show the contact name in some cases
@@ -131,7 +140,10 @@ class MainActivity : SimpleActivity() {
                         handlePermission(PERMISSION_READ_CONTACTS) {
                             initMessenger()
                             bus = EventBus.getDefault()
-                            bus!!.register(this)
+                            try {
+                                bus!!.register(this)
+                            } catch (e: Exception) {
+                            }
                         }
                     } else {
                         finish()
@@ -158,7 +170,13 @@ class MainActivity : SimpleActivity() {
 
     private fun getCachedConversations() {
         ensureBackgroundThread {
-            val conversations = conversationsDB.getAll().sortedByDescending { it.date }.toMutableList() as ArrayList<Conversation>
+            val conversations = try {
+                conversationsDB.getAll().sortedByDescending { it.date }.toMutableList() as ArrayList<Conversation>
+            } catch (e: Exception) {
+                ArrayList()
+            }
+
+            updateUnreadCountBadge(conversations)
             runOnUiThread {
                 setupConversations(conversations)
                 getNewConversations(conversations)
@@ -167,40 +185,30 @@ class MainActivity : SimpleActivity() {
     }
 
     private fun getNewConversations(cachedConversations: ArrayList<Conversation>) {
-        val privateCursor = getMyContactsContentProviderCursorLoader().loadInBackground()
+        val privateCursor = getMyContactsCursor()?.loadInBackground()
         ensureBackgroundThread {
-            val conversations = getConversations()
-
-            // check if no message came from a privately stored contact in Simple Contacts
             val privateContacts = MyContactsContentProvider.getSimpleContacts(this, privateCursor)
-            if (privateContacts.isNotEmpty()) {
-                conversations.filter { it.title == it.phoneNumber }.forEach { conversation ->
-                    privateContacts.firstOrNull { it.phoneNumber == conversation.phoneNumber }?.apply {
-                        conversation.title = name
-                        conversation.photoUri = photoUri
-                    }
-                }
-            }
+            val conversations = getConversations(privateContacts = privateContacts)
 
             runOnUiThread {
                 setupConversations(conversations)
             }
 
             conversations.forEach { clonedConversation ->
-                if (!cachedConversations.map { it.thread_id }.contains(clonedConversation.thread_id)) {
+                if (!cachedConversations.map { it.threadId }.contains(clonedConversation.threadId)) {
                     conversationsDB.insertOrUpdate(clonedConversation)
                     cachedConversations.add(clonedConversation)
                 }
             }
 
             cachedConversations.forEach { cachedConversation ->
-                if (!conversations.map { it.thread_id }.contains(cachedConversation.thread_id)) {
+                if (!conversations.map { it.threadId }.contains(cachedConversation.threadId)) {
                     conversationsDB.delete(cachedConversation.id!!)
                 }
             }
 
             cachedConversations.forEach { cachedConversation ->
-                val conv = conversations.firstOrNull { it.thread_id == cachedConversation.thread_id && it.getStringToCompare() != cachedConversation.getStringToCompare() }
+                val conv = conversations.firstOrNull { it.threadId == cachedConversation.threadId && it.getStringToCompare() != cachedConversation.getStringToCompare() }
                 if (conv != null) {
                     conversationsDB.insertOrUpdate(conv)
                 }
@@ -218,15 +226,23 @@ class MainActivity : SimpleActivity() {
         if (currAdapter == null) {
             ConversationsAdapter(this, conversations, conversations_list, conversations_fastscroller) {
                 Intent(this, ThreadActivity::class.java).apply {
-                    putExtra(THREAD_ID, (it as Conversation).thread_id)
+                    putExtra(THREAD_ID, (it as Conversation).threadId)
                     putExtra(THREAD_TITLE, it.title)
                     startActivity(this)
                 }
             }.apply {
                 conversations_list.adapter = this
             }
+
+            conversations_fastscroller.setViews(conversations_list) {
+                val listItem = (conversations_list.adapter as? ConversationsAdapter)?.conversations?.getOrNull(it)
+                conversations_fastscroller.updateBubbleText(listItem?.title ?: "")
+            }
         } else {
-            (currAdapter as ConversationsAdapter).updateConversations(conversations)
+            try {
+                (currAdapter as ConversationsAdapter).updateConversations(conversations)
+            } catch (ignored: Exception) {
+            }
         }
     }
 
@@ -277,7 +293,8 @@ class MainActivity : SimpleActivity() {
 
         val faqItems = arrayListOf(
             FAQItem(R.string.faq_2_title_commons, R.string.faq_2_text_commons),
-            FAQItem(R.string.faq_6_title_commons, R.string.faq_6_text_commons)
+            FAQItem(R.string.faq_6_title_commons, R.string.faq_6_text_commons),
+            FAQItem(R.string.faq_9_title_commons, R.string.faq_9_text_commons)
         )
 
         startAboutActivity(R.string.app_name, licenses, BuildConfig.VERSION_NAME, faqItems, true)

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.telephony.SubscriptionManager
+import android.util.TypedValue
 import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
@@ -28,22 +29,22 @@ import com.simplemobiletools.commons.views.FastScroller
 import com.simplemobiletools.commons.views.MyRecyclerView
 import com.simplemobiletools.smsmessenger.R
 import com.simplemobiletools.smsmessenger.activities.SimpleActivity
+import com.simplemobiletools.smsmessenger.dialogs.SelectTextDialog
 import com.simplemobiletools.smsmessenger.extensions.deleteMessage
 import com.simplemobiletools.smsmessenger.helpers.*
-import com.simplemobiletools.smsmessenger.models.Message
-import com.simplemobiletools.smsmessenger.models.ThreadDateTime
-import com.simplemobiletools.smsmessenger.models.ThreadError
-import com.simplemobiletools.smsmessenger.models.ThreadItem
+import com.simplemobiletools.smsmessenger.models.*
 import kotlinx.android.synthetic.main.item_attachment_image.view.*
 import kotlinx.android.synthetic.main.item_received_message.view.*
 import kotlinx.android.synthetic.main.item_received_unknown_attachment.view.*
 import kotlinx.android.synthetic.main.item_sent_unknown_attachment.view.*
 import kotlinx.android.synthetic.main.item_thread_date_time.view.*
+import kotlinx.android.synthetic.main.item_thread_error.view.*
+import kotlinx.android.synthetic.main.item_thread_success.view.*
 
 class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem>, recyclerView: MyRecyclerView, fastScroller: FastScroller,
                     itemClick: (Any) -> Unit) : MyRecyclerViewAdapter(activity, recyclerView, fastScroller, itemClick) {
-
     private val roundedCornersRadius = resources.getDimension(R.dimen.normal_margin).toInt()
+    private var fontSize = activity.getTextSize()
 
     @SuppressLint("MissingPermission")
     private val hasMultipleSIMCards = SubscriptionManager.from(activity).activeSubscriptionInfoList?.size ?: 0 > 1
@@ -59,6 +60,7 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
         menu.apply {
             findItem(R.id.cab_copy_to_clipboard).isVisible = isOneItemSelected
             findItem(R.id.cab_share).isVisible = isOneItemSelected
+            findItem(R.id.cab_select_text).isVisible = isOneItemSelected
         }
     }
 
@@ -70,7 +72,7 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
         when (id) {
             R.id.cab_copy_to_clipboard -> copyToClipboard()
             R.id.cab_share -> shareText()
-            R.id.cab_select_all -> selectAll()
+            R.id.cab_select_text -> selectText()
             R.id.cab_delete -> askConfirmDelete()
         }
     }
@@ -79,9 +81,9 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
 
     override fun getIsItemSelectable(position: Int) = !isThreadDateTime(position)
 
-    override fun getItemSelectionKey(position: Int) = (messages.getOrNull(position) as? Message)?.id
+    override fun getItemSelectionKey(position: Int) = (messages.getOrNull(position) as? Message)?.hashCode()
 
-    override fun getItemKeyPosition(key: Int) = messages.indexOfFirst { (it as? Message)?.id == key }
+    override fun getItemKeyPosition(key: Int) = messages.indexOfFirst { (it as? Message)?.hashCode() == key }
 
     override fun onActionModeCreated() {}
 
@@ -92,6 +94,7 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
             THREAD_DATE_TIME -> R.layout.item_thread_date_time
             THREAD_RECEIVED_MESSAGE -> R.layout.item_received_message
             THREAD_SENT_MESSAGE_ERROR -> R.layout.item_thread_error
+            THREAD_SENT_MESSAGE_SUCCESS -> R.layout.item_thread_success
             else -> R.layout.item_sent_message
         }
         return createViewHolder(layout, parent)
@@ -100,10 +103,11 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = messages[position]
         holder.bindView(item, true, item is Message) { itemView, layoutPosition ->
-            if (item is ThreadDateTime) {
-                setupDateTime(itemView, item)
-            } else if (item !is ThreadError) {
-                setupView(itemView, item as Message)
+            when (item) {
+                is ThreadDateTime -> setupDateTime(itemView, item)
+                is ThreadSuccess -> setupThreadSuccess(itemView)
+                is ThreadError -> setupThreadError(itemView)
+                else -> setupView(itemView, item as Message)
             }
         }
         bindViewHolder(holder)
@@ -117,6 +121,7 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
             item is ThreadDateTime -> THREAD_DATE_TIME
             (messages[position] as? Message)?.isReceivedMessage() == true -> THREAD_RECEIVED_MESSAGE
             item is ThreadError -> THREAD_SENT_MESSAGE_ERROR
+            item is ThreadSuccess -> THREAD_SENT_MESSAGE_SUCCESS
             else -> THREAD_SENT_MESSAGE
         }
     }
@@ -131,9 +136,23 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
         activity.shareTextIntent(firstItem.body)
     }
 
+    private fun selectText() {
+        val firstItem = getSelectedItems().first() as? Message ?: return
+        if (firstItem.body.trim().isNotEmpty()) {
+            SelectTextDialog(activity, firstItem.body)
+        }
+    }
+
     private fun askConfirmDelete() {
         val itemsCnt = selectedKeys.size
-        val items = resources.getQuantityString(R.plurals.delete_messages, itemsCnt, itemsCnt)
+
+        // not sure how we can get UnknownFormatConversionException here, so show the error and hope that someone reports it
+        val items = try {
+            resources.getQuantityString(R.plurals.delete_messages, itemsCnt, itemsCnt)
+        } catch (e: Exception) {
+            activity.showErrorToast(e)
+            return
+        }
 
         val baseString = R.string.deletion_confirmation
         val question = String.format(resources.getString(baseString), items)
@@ -150,7 +169,7 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
             return
         }
 
-        val messagesToRemove = messages.filter { selectedKeys.contains((it as? Message)?.id ?: 0) } as ArrayList<ThreadItem>
+        val messagesToRemove = getSelectedItems()
         val positions = getSelectedItemPositions()
         messagesToRemove.forEach {
             activity.deleteMessage((it as Message).id, it.isMMS)
@@ -167,7 +186,7 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
         }
     }
 
-    private fun getSelectedItems() = messages.filter { selectedKeys.contains((it as? Message)?.id ?: 0) } as ArrayList<ThreadItem>
+    private fun getSelectedItems() = messages.filter { selectedKeys.contains((it as? Message)?.hashCode() ?: 0) } as ArrayList<ThreadItem>
 
     private fun isThreadDateTime(position: Int) = messages.getOrNull(position) is ThreadDateTime
 
@@ -180,26 +199,33 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
 
     private fun setupView(view: View, message: Message) {
         view.apply {
-            thread_message_holder.isSelected = selectedKeys.contains(message.id)
-            thread_message_body.text = message.body
+            thread_message_holder.isSelected = selectedKeys.contains(message.hashCode())
+            thread_message_body.apply {
+                text = message.body
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSize)
+            }
             thread_message_body.beVisibleIf(message.body.isNotEmpty())
 
             if (message.isReceivedMessage()) {
                 thread_message_sender_photo.beVisible()
                 thread_message_body.setTextColor(textColor)
+                thread_message_body.setLinkTextColor(context.getAdjustedPrimaryColor())
                 SimpleContactsHelper(context).loadContactImage(message.senderPhotoUri, thread_message_sender_photo, message.senderName)
             } else {
                 thread_message_sender_photo?.beGone()
                 val background = context.getAdjustedPrimaryColor()
                 thread_message_body.background.applyColorFilter(background.adjustAlpha(0.8f))
-                thread_message_body.setTextColor(background.getContrastColor())
+
+                val contrastColor = background.getContrastColor()
+                thread_message_body.setTextColor(contrastColor)
+                thread_message_body.setLinkTextColor(contrastColor)
             }
 
             thread_mesage_attachments_holder.removeAllViews()
             if (message.attachment?.attachments?.isNotEmpty() == true) {
                 for (attachment in message.attachment.attachments) {
                     val mimetype = attachment.mimetype
-                    val uri = attachment.uri
+                    val uri = attachment.getUri()
                     if (mimetype.startsWith("image/") || mimetype.startsWith("video/")) {
                         val imageView = layoutInflater.inflate(R.layout.item_attachment_image, null)
                         thread_mesage_attachments_holder.addView(imageView)
@@ -286,7 +312,10 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
 
     private fun setupDateTime(view: View, dateTime: ThreadDateTime) {
         view.apply {
-            thread_date_time.text = dateTime.date.formatDateOrTime(context, false)
+            thread_date_time.apply {
+                text = dateTime.date.formatDateOrTime(context, false)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSize)
+            }
             thread_date_time.setTextColor(textColor)
 
             thread_sim_icon.beVisibleIf(hasMultipleSIMCards)
@@ -297,5 +326,13 @@ class ThreadAdapter(activity: SimpleActivity, var messages: ArrayList<ThreadItem
                 thread_sim_icon.applyColorFilter(textColor)
             }
         }
+    }
+
+    private fun setupThreadSuccess(view: View) {
+        view.thread_success.applyColorFilter(textColor)
+    }
+
+    private fun setupThreadError(view: View) {
+        view.thread_error.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSize)
     }
 }
